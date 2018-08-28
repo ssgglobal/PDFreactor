@@ -13,6 +13,23 @@ composer require ssgglobal/pdf-reactor
 
 ### Using with Laravel
 
+Add pdfreactor settings to config/services.php
+```
+'pdfreactor' => [
+    'host'  => env('PDFREACTOR_HOST'),
+    'port'  => env('PDFREACTOR_PORT', 9423),
+    'key'   => env('PDFREACTOR_KEY')
+],
+```
+
+Add pdfreactor settings to .env and/or .env.example
+```
+; PDFreactor
+PDFREACTOR_HOST=http://pdfreactor.domain
+PDFREACTOR_PORT=9423
+PDFREACTOR_KEY=
+```
+
 Add Service Provider to config/app.php
 ```
 'providers' => [

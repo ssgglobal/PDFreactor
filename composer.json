@@ -1,5 +1,5 @@
 {
-    "name": "ssgglobal/PDFreactor",
+    "name": "ssgglobal/pdf-reactor",
     "description": "A wrapper for PDFreactor library",
     "type": "Library",
     "require": {

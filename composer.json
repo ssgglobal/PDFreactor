@@ -7,7 +7,14 @@
     },
     "autoload": {
         "psr-4": {
-            "StepStone\\PDFreactor\\": "src/"
+            "StepStone\\PDFreactor\\": "src/PDFreactor/"
+        }
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "StepStone\\PDFreactor\\Providers\\ServiceProvider"
+            ]
         }
     }
 }

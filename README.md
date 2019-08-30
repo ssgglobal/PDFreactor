@@ -13,13 +13,9 @@ composer require ssgglobal/pdf-reactor
 
 ### Using with Laravel
 
-Add pdfreactor settings to config/services.php
+Publish the pdfreactor config
 ```
-'pdfreactor' => [
-    'host'  => env('PDFREACTOR_HOST'),
-    'port'  => env('PDFREACTOR_PORT', 9423),
-    'key'   => env('PDFREACTOR_KEY')
-],
+php artistan vendor:publish
 ```
 
 Add pdfreactor settings to .env and/or .env.example

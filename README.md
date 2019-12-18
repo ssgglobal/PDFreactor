@@ -29,7 +29,7 @@ PDFREACTOR_KEY=
 Add Service Provider to config/app.php
 ```
 'providers' => [
-    StepStone\PDFreactor\PDFreactorServiceProvider::class
+    StepStone\PDFreactor\Providers\ServiceProvider::class
 ],
 ```
 

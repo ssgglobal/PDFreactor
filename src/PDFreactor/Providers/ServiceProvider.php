@@ -3,6 +3,7 @@
 namespace StepStone\PDFreactor\Providers;
 
 use Illuminate\Support\ServiceProvider as BaseProvider;
+use StepStone\PDFreactor\PDFreactor;
 
 class ServiceProvider extends BaseProvider
 {

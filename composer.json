@@ -3,7 +3,8 @@
     "description": "A wrapper for PDFreactor library",
     "type": "Library",
     "require": {
-        "php": ">=7.0"
+        "php": ">=7.0",
+        "illuminate/support": "^5.7||^6.8"
     },
     "autoload": {
         "psr-4": {

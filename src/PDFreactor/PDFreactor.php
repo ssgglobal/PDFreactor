@@ -50,7 +50,7 @@ class PDFreactor
      * @param integer $port
      * @param string|null $apiKey
      */
-    public function __construct(string $url, int $port, ?string $apiKey = null)
+    public function __construct(string $url, int $port = 9423, ?string $apiKey = null)
     {
         $this->api  = new Api($url, $port, $apiKey);
     }

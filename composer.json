@@ -4,11 +4,16 @@
     "type": "library",
     "require": {
         "php": ">=7.0",
-        "illuminate/support": "^5.7||^6.8"
+        "guzzlehttp/guzzle": "^7.0"
     },
     "autoload": {
         "psr-4": {
             "StepStone\\PDFreactor\\": "src/PDFreactor/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "StepStone\\PDFreactor\\Tests\\": "tests/"
         }
     },
     "extra": {
@@ -17,5 +22,8 @@
                 "StepStone\\PDFreactor\\Providers\\ServiceProvider"
             ]
         }
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^9.2|^8.0"
     }
 }

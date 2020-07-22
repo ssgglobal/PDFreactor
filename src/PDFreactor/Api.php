@@ -6,6 +6,8 @@ use Exception;
 use GuzzleHttp\Client as HttpClient;
 use GuzzleHttp\Exception\ClientException;
 use GuzzleHttp\Cookie\CookieJar;
+use GuzzleHttp\Handler\MockHandler;
+use GuzzleHttp\HandlerStack;
 use GuzzleHttp\Psr7\Response;
 use stdClass;
 use StepStone\PDFreactor\Exceptions\HttpException;
@@ -24,7 +26,7 @@ class Api
      *
      * @var CookieJar
      */
-    protected $cookies;
+    protected $cookies  = [];
 
     /**
      * Headers that are sent along with a request.
@@ -47,20 +49,31 @@ class Api
     /**
      * Class constructor
      *
-     * @param string $url
+     * @param HttpClient $client
      * @param string|null $apiKey
      * @param array $headers
      * @param array $cookies
      */
-    public function __construct(string $url, int $port = 9423, ?string $apiKey = null, array $headers = [], array $cookies = [])
+    public function __construct(HttpClient $client, ?string $apiKey = null, array $headers = [], array $cookies = []) 
     {
-        if (! filter_var($url, FILTER_VALIDATE_URL)) {
-            throw new Exception('PDFreactor URL is not valid.');
-        }
-
         $this->apiKey       = $apiKey;
+        $this->cookies      = array_merge($this->cookies, $cookies);
         $this->headers      = array_merge($this->headers, $headers);
-        $this->http         = new HttpClient(['base_uri' => "{$url}:{$port}/service/rest/"]);
+        $this->http         = $client ?? new HttpClient;
+    }
+
+    /**
+     * Creates a new API instance.
+     *
+     * @param array $options
+     * @param string|null $apiKey
+     * @param array $headers
+     * @param array $cookies
+     * @return Api
+     */
+    public static function create(array $options, ?string $apiKey, array $headers = [], array $cookies = []): Api
+    {
+        return (new self(new HttpClient($options), $apiKey, $headers, $cookies));
     }
 
     /**
@@ -110,8 +123,8 @@ class Api
             }
 
             $result = new stdClass;
-
-            $result->id         = str_replace('/progress/', '', $response->getHeader('Location')) ?? null;
+            
+            $result->id         = str_replace('/progress/', '', $response->getHeader('Location')[0]) ?? null;
             $result->status     = $response->getStatusCode();
             $result->success    = ($result->status >= 200 && $result->status <= 204);
 

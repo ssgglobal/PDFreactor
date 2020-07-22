@@ -19,6 +19,6 @@
         </whitelist>
     </filter>
     <php>
-        
+        <env name="MOCK_PDFREACTOR_API" value="true" /> 
     </php>
 </phpunit>

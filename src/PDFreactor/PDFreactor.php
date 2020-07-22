@@ -32,14 +32,11 @@
 namespace StepStone\PDFreactor;
 
 use Exception;
-use StepStone\PDFreactor\Exceptions\HttpException;
+use GuzzleHttp\Handler\MockHandler;
+use GuzzleHttp\HandlerStack;
 
 class PDFreactor
 {
-    const CLIENT    = 'PHP';
-
-    const VERSION   = 2;
-
     /** @var Api */
     protected $api;
 
@@ -49,10 +46,19 @@ class PDFreactor
      * @param string $url
      * @param integer $port
      * @param string|null $apiKey
+     * @param MockHandler|null $mock
      */
-    public function __construct(string $url, int $port = 9423, ?string $apiKey = null)
+    public function __construct(string $url, int $port = 9423, ?string $apiKey = null, ?MockHandler $mock = null)
     {
-        $this->api  = new Api($url, $port, $apiKey);
+        $options    = [
+            'base_uri'  => "{$url}:{$port}/service/rest/"
+        ];
+
+        if ($mock) {
+            $options['handler'] = HandlerStack::create($mock);
+        }
+
+        $this->api  = Api::create($options, $apiKey);
     }
 
     /**
@@ -62,27 +68,15 @@ class PDFreactor
      * 
      * @throws Exception if $body isn't a string or instance of Config.
      *
-     * @param Config|string $body
+     * @param Convertable $config
      * @return string
      */
-    public function convertAsync($body): string
+    public function convertAsync(Convertable $convertable): string
     {
-        if (is_string($body)) {
-            $body   = new Config($body, [
-                'ClientName'    => self::CLIENT,
-                'ClientVersion' => self::VERSION,
-            ]);
-        } elseif ($body instanceof Config) {
-            $body->addConfig('ClientName', self::CLIENT)
-                ->addConfig('ClientVersion', self::VERSION);
-        } else {
-            throw new Exception('$body must be a string or instance of \StepStone\PDFReactor\Config');
-        }
-
-        $result = $this->api->send('POST', 'convert/async.json', $body->__toArray());
+        $result = $this->api->send('POST', 'convert/async.json', $convertable->__toArray());
 
         if (! isset($result->id)) {
-            throw new Exception('Unable to retrieve Document ID from request.');
+            throw new Exception('Unable to retrieve Document ID from Response.');
         }
 
         return $result->id;

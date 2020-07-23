@@ -78,6 +78,8 @@ class PDFreactor
      * 
      * @see https://www.pdfreactor.com/product/doc/webservice/rest.html#post-convert-async
      * 
+     * @throws Exception if $convertable is not an instance of Convertable or can't be converted to one.
+     * 
      * @throws HttpException If Location header is missing from result.
      * 
      * @throws HttpException If the Document Id sent by the server can't be parsed from the Location header.
@@ -86,28 +88,30 @@ class PDFreactor
      * @param Convertable $config
      * @return string
      */
-    public function convertAsync(Convertable $convertable): string
+    public function convertAsync($convertable): string
     {
-        try {
-            $this->result = $this->api->send('POST', 'convert/async.json', $convertable->__toArray());
-
-            if (! isset($this->result->headers['Location'][0])) {
-                throw new HttpException("Unable to retrieve Document ID from Response.", 500);
-            }
-
-            preg_match('/[a-f0-9]{8}\-[a-f0-9]{4}\-4[a-f0-9]{3}\-(8|9|a|b)[a-f0-9]{3}\-[a-f0-9]{12}/', $this->result->headers['Location'][0], $matches);
-
-            if (! count($matches) || ! is_string($matches[0])) {
-                throw new HttpException("Unable to retrieve Document ID from Response.", 500);
-            }
-
-            return $matches[0];
-
-        } catch (HttpException $e) {
-            throw $e;
-        } catch (Exception $e) {
-            throw new HttpException($e->getMessage(), 500, $e->getCode());
+        if (is_array($convertable)) {
+            $convertable    = Convertable::create($convertable);
         }
+
+        if (! $convertable instanceof Convertable) {
+            throw new Exception('$convertable must be an Array or Convertable.');
+        }
+
+        $this->result = $this->api->send('POST', 'convert/async.json', $convertable->__toArray());
+
+        if (! isset($this->result->headers['Location'][0])) {
+            throw new HttpException("Unable to retrieve Document ID from Response.", 500);
+        }
+
+        // we get a url back like /progress/some-uu-id we only want the uuid.
+        preg_match('/[a-f0-9]{8}\-[a-f0-9]{4}\-4[a-f0-9]{3}\-(8|9|a|b)[a-f0-9]{3}\-[a-f0-9]{12}/', $this->result->headers['Location'][0], $matches);
+
+        if (! count($matches) || ! is_string($matches[0])) {
+            throw new HttpException("Unable to retrieve Document ID from Response.", 500);
+        }
+
+        return $matches[0];
     }
 
     /**
@@ -148,5 +152,17 @@ class PDFreactor
                 $e->getCode()
             );
         }
+    }
+
+    /**
+     * Get the version of the PDFreactor server.
+     *
+     * @return string
+     */
+    public function getVersion(): string
+    {
+        $this->result   = $this->api->send('GET', 'version');
+
+        return $this->result->body;
     }
 }

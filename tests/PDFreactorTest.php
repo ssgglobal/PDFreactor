@@ -62,6 +62,17 @@ class PDFreactorTest extends TestCase
         $this->assertTrue($result->finished);
     }
 
+    public function test_get_server_version()
+    {
+        $pdfreactor = $this->pdfreactorMock(new MockHandler([
+            new Response(200, ['Content-Type' => 'text/plain'], '9.1.9797.9'),
+        ]));
+
+        $this->assertIsString(
+            $pdfreactor->getVersion()
+        );
+    }
+
     /**
      * Creates a new PDFreactor instances for testing.
      *

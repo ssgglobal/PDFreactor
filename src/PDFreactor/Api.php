@@ -124,7 +124,7 @@ class Api
 
             $result = new stdClass;
             
-            $result->id         = str_replace('/progress/', '', $response->getHeader('Location')[0]) ?? null;
+            $result->headers    = $response->getHeaders();
             $result->status     = $response->getStatusCode();
             $result->success    = ($result->status >= 200 && $result->status <= 204);
 

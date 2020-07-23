@@ -34,11 +34,23 @@ namespace StepStone\PDFreactor;
 use Exception;
 use GuzzleHttp\Handler\MockHandler;
 use GuzzleHttp\HandlerStack;
+use stdClass;
+use StepStone\PDFreactor\Exceptions\HttpException;
 
 class PDFreactor
 {
+    const CLIENT    = 'PHP';
+    const VERSION   = 2;
+
     /** @var Api */
     protected $api;
+
+    /**
+     * Store the result of the last API call made.
+     *
+     * @var null|stdClass
+     */
+    protected $result;
 
     /**
      * Creates a new instance of Api to use.
@@ -66,19 +78,75 @@ class PDFreactor
      * 
      * @see https://www.pdfreactor.com/product/doc/webservice/rest.html#post-convert-async
      * 
-     * @throws Exception if $body isn't a string or instance of Config.
+     * @throws HttpException If Location header is missing from result.
+     * 
+     * @throws HttpException If the Document Id sent by the server can't be parsed from the Location header.
+     *      The PDFreactor service will send a UUID as a document Id. 
      *
      * @param Convertable $config
      * @return string
      */
     public function convertAsync(Convertable $convertable): string
     {
-        $result = $this->api->send('POST', 'convert/async.json', $convertable->__toArray());
+        try {
+            $this->result = $this->api->send('POST', 'convert/async.json', $convertable->__toArray());
 
-        if (! isset($result->id)) {
-            throw new Exception('Unable to retrieve Document ID from Response.');
+            if (! isset($this->result->headers['Location'][0])) {
+                throw new HttpException("Unable to retrieve Document ID from Response.", 500);
+            }
+
+            preg_match('/[a-f0-9]{8}\-[a-f0-9]{4}\-4[a-f0-9]{3}\-(8|9|a|b)[a-f0-9]{3}\-[a-f0-9]{12}/', $this->result->headers['Location'][0], $matches);
+
+            if (! count($matches) || ! is_string($matches[0])) {
+                throw new HttpException("Unable to retrieve Document ID from Response.", 500);
+            }
+
+            return $matches[0];
+
+        } catch (HttpException $e) {
+            throw $e;
+        } catch (Exception $e) {
+            throw new HttpException($e->getMessage(), 500, $e->getCode());
         }
+    }
 
-        return $result->id;
+    /**
+     * Returns result from the last API call made.
+     *
+     * @return stdClass|null
+     */
+    public function getLastResult(): ?stdClass
+    {
+        return $this->result;
+    }
+
+    /**
+     * Get the progress of an aysnc conversion process.
+     * 
+     * @see https://www.pdfreactor.com/product/doc/webservice/rest.html#get-progress-id
+     * 
+     * @throws HttpException when the server returns a 404 error.
+     * 
+     *
+     * @param string $documentId
+     * @return void
+     */
+    public function getProgress(string $documentId): stdClass
+    {
+        // The native PDFreactor error doesn't attach the $documentId in the
+        // error message, so we'll catch and rethrow with it.
+        try {
+            $this->result = $this->api->send('GET', "progress/{$documentId}.json");
+
+            return $this->result->json;
+
+        } catch (HttpException $e) {
+
+            throw new HttpException(
+                ($e->getStatus() == 404 ? "No document was found with ID {$documentId}." : $e->getMessage()),
+                $e->getStatus(),
+                $e->getCode()
+            );
+        }
     }
 }

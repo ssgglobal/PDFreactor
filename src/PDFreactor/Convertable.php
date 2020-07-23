@@ -2,6 +2,8 @@
 
 namespace StepStone\PDFreactor;
 
+use Exception;
+
 class Convertable
 {
     const JS_MODE_DISABLED              = "DISABLED";
@@ -111,5 +113,29 @@ class Convertable
     public function mergeDocuments(DocResource $resource): self
     {
         return $this->addConfig('mergeDocuments', $resource->__toArray());
+    }
+
+    /**
+     * Helper to create a new convertable instance. $body can be the document body content as a string
+     * or a $config array. If $body is a config array it must have a the 'document' key.
+     * 
+     * @throws Exception if $body is an array and 'document' key is missing or null.
+     *
+     * @param string|array $body
+     * @param array|null $config
+     * @return Convertable
+     */
+    public static function create($body, ?array $config = []): Convertable
+    {
+        if (is_array($body)) {
+            $config = $body;
+            $body   = $config['document'] ?? null;
+        }
+
+        if (is_null($body)) {
+            throw new Exception('A Document body is required.');
+        }
+
+        return (new self($body, $config));
     }
 }

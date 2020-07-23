@@ -115,6 +115,29 @@ class PDFreactor
     }
 
     /**
+     * Delete a document from the server.
+     *
+     * @param string $documentId
+     * @return boolean
+     */
+    public function deleteDocument(string $documentId): bool
+    {
+        try {
+            $this->result = $this->api->send('DELETE', "document/{$documentId}");
+
+            return !! ($this->result->status === 204);
+
+        } catch (HttpException $e) {
+
+            throw new HttpException(
+                ($e->getStatus() == 404 ? "No document was found with ID {$documentId}." : $e->getMessage()),
+                $e->getStatus(),
+                $e->getCode()
+            );
+        }
+    }
+
+    /**
      * Returns result from the last API call made.
      *
      * @return stdClass|null

@@ -62,6 +62,17 @@ class PDFreactorTest extends TestCase
         $this->assertTrue($result->finished);
     }
 
+    public function test_get_bool_when_deleting_document()
+    {
+        $pdfreactor   = $this->pdfreactorMock(new MockHandler([
+            new Response(204),
+        ]));
+
+        $this->assertTrue(
+            $pdfreactor->deleteDocument($this->uuid)
+        )
+    }
+
     public function test_get_server_version()
     {
         $pdfreactor = $this->pdfreactorMock(new MockHandler([

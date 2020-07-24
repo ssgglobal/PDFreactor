@@ -47,7 +47,7 @@ class PDFreactor
 
     /** @var Api */
     protected $api;
-
+    
     /**
      * Store the result of the last API call made.
      *
@@ -66,14 +66,21 @@ class PDFreactor
     public function __construct(string $url, int $port = 9423, ?string $apiKey = null, ?MockHandler $mock = null)
     {
         $options    = [
-            'base_uri'  => "{$url}:{$port}/service/rest/"
+            'allow_redirects'   => false,
+            'base_uri'  => "{$url}:{$port}/service/rest/",
+            'http_errors'       => true,
+            'query'             => [],
         ];
+
+        if ($apiKey) {
+            $options['query']['apiKey'] = $apiKey;
+        }
 
         if ($mock) {
             $options['handler'] = HandlerStack::create($mock);
         }
 
-        $this->api  = Api::create($options, $apiKey);
+        $this->api  = new Api($options);
     }
 
     /**

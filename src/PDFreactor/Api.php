@@ -46,31 +46,19 @@ class Api
     /**
      * Class constructor
      *
-     * @param HttpClient $client
-     * @param string|null $apiKey
-     * @param array $headers
-     * @param array $cookies
+     * @param array|HttpClient $client
      */
-    public function __construct(HttpClient $client, ?string $apiKey = null, array $headers = [], array $cookies = []) 
+    public function __construct($client) 
     {
-        $this->apiKey       = $apiKey;
-        $this->cookies      = array_merge($this->cookies, $cookies);
-        $this->headers      = array_merge($this->headers, $headers);
-        $this->http         = $client ?? new HttpClient;
-    }
+        if (is_array($client)) {
+            $client = new HttpClient($client);
+        }
 
-    /**
-     * Creates a new API instance.
-     *
-     * @param array $options
-     * @param string|null $apiKey
-     * @param array $headers
-     * @param array $cookies
-     * @return Api
-     */
-    public static function create(array $options, ?string $apiKey, array $headers = [], array $cookies = []): Api
-    {
-        return (new self(new HttpClient($options), $apiKey, $headers, $cookies));
+        if (! $client instanceof HttpClient) {
+            throw new Exception('$client must be an instance of HttpClient or array.');
+        }
+
+        $this->http         = $client;
     }
 
     /**
@@ -87,36 +75,25 @@ class Api
      * @param array $query
      * @return stdClass
      */
-    public function send(string $verb, string $uri, $body = null, array $headers = [], array $query = []): stdClass
+    public function send(string $verb, string $uri, $body = null): stdClass
     {
         try {
-            $options    = [
-                'allow_redirects'   => false,
-                'headers'           => array_merge($this->headers, $headers),
-                'http_errors'       => true,
-                'query'             => $query,
-            ];
-    
             // the $uri shouldn't have a leading forward slash.
             $uri    = ltrim($uri, '/');
-    
-            if ($this->apiKey) {
-                $options['query']['apiKey'] = $this->apiKey;
-            }
     
             switch (strtoupper($verb)) {
     
                 case 'GET':
-                    $response   = $this->http->request('GET', $uri, $options);
+                    $response   = $this->http->request('GET', $uri);
                 break;
     
                 case 'POST':
                     $options['json']    = $body;
-                    $response           = $this->http->request('POST', $uri, $options);
+                    $response           = $this->http->request('POST', $uri);
                 break;
 
                 case 'DELETE':
-                    $response   = $this->http->request('DELETE', $uri, $options);
+                    $response   = $this->http->request('DELETE', $uri);
                 break;
     
                 default:

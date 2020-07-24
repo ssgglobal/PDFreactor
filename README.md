@@ -43,19 +43,38 @@ Add the PDFreactor Facade to the Alias list
 ## Usage
 
 ### Vanilla PHP
+
+#### Using an array
 ```
 use StepStone\PDFreactor\PDFreactor;
 
-$url    = 'http://pdfreactor.domain';
-$port   = 999;
+$pdfreactor = new PDFreactor($url);
 
-$pdfreactor = new PDFreactor($url, $port);
-$results = $pdfreactor->convert($config);
+// config data
+$config = ['document' => file_get_contents('data_to_convert.html')];
+
+$results = $pdfreactor->convertAsync($config);
+```
+
+#### Using the Config class
+```
+use StepStone\PDFreactor\PDFreactor;
+use StepStone\PDFreactor\Config as PDFreactorConfig;
+
+$pdfreactor = new PDFreactor($url);
+
+$config = new PDFreactorConfig(file_get_contents('data_to_convert.html'));
+$config->keepDocument();
+
+$results = $pdfreactor->convertAsync($config);
 ```
 
 ### Laravel 5.0+
 ```
 use PDFreactor;
+use StepStone\PDFreactor\Config as PDFreactorConfig;
+
+$config = new PDFreactorConfig($data);
 
 $results = PDFreactor::convert($config);
 ```

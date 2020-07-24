@@ -1,13 +1,14 @@
 <?php
+
 /**
- * RealObjects PDFreactor PHP Wrapper version 4
- * http://www.pdfreactor.com
+ * StepStone PDFreactor PHP Wrapper version 2
+ * 
+ * This library is based on RealObjects PDFreactor PHP Wrapper v4.
+ * https://www.pdfreactor.com
  * 
  * Released under the following license:
  * 
  * The MIT License (MIT)
- * 
- * Copyright (c) 2015-2017 RealObjects GmbH
  * 
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -28,1010 +29,296 @@
  * SOFTWARE.
  */
 
- namespace StepStone\PDFreactor;
+namespace StepStone\PDFreactor;
 
- class PDFreactor
- {
-    public $apiKey;
+use Exception;
+use GuzzleHttp\Handler\MockHandler;
+use GuzzleHttp\HandlerStack;
+use stdClass;
+use StepStone\PDFreactor\Exceptions\HttpException;
+use StepStone\PDFreactor\Models\Progress;
+use StepStone\PDFreactor\Models\Result;
+use StepStone\PDFreactor\Models\Version;
 
-    public $cookies     = [];
+class PDFreactor
+{
+    const CLIENT    = 'PHP';
+    const VERSION   = 2;
 
-    public $headers     = [];
+    /** @var Api */
+    protected $api;
+    
+    /**
+     * Store the result of the last API call made.
+     *
+     * @var null|stdClass
+     */
+    protected $result;
 
-    public $stickyMap   = [];
-
-    public $url;
-
-    public function __construct(string $url, int $port, string $key = null, array $headers = [],
-            array $cookies = [], array $stickyMap = [])
+    /**
+     * Creates a new instance of Api to use.
+     *
+     * @param string $url
+     * @param integer $port
+     * @param string|null $apiKey
+     * @param MockHandler|null $mock
+     */
+    public function __construct(string $url, int $port = 9423, ?string $apiKey = null, ?MockHandler $mock = null)
     {
-        $this->url         = "{$url}:{$port}/service/rest";
-        $this->headers     = $headers;
-        $this->cookies     = $cookies;
-        $this->apiKey      = $key;
-        $this->stickyMap   = $stickyMap;
+        $options    = [
+            'allow_redirects'   => false,
+            'base_uri'  => "{$url}:{$port}/service/rest/",
+            'http_errors'       => true,
+            'query'             => [],
+        ];
+
+        if ($apiKey) {
+            $options['query']['apiKey'] = $apiKey;
+        }
+
+        if ($mock) {
+            $options['handler'] = HandlerStack::create($mock);
+        }
+
+        $this->api  = new Api($options);
     }
- 
-    function convert($config) {
-        $url = $this->url ."/convert.json";
-        if (!is_null($this->apiKey)) {
-           $url .= "?apiKey=" . $this->apiKey;
+
+    /**
+     * Make an async request to PDFReactor to create a new Document.
+     * 
+     * @link https://www.pdfreactor.com/product/doc/webservice/rest.html#post-convert-async
+     * 
+     * @throws Exception if $convertable is not an instance of Convertable or can't be converted to one.
+     * 
+     * @throws HttpException If Location header is missing from result.
+     * 
+     * @throws HttpException If the Document Id sent by the server can't be parsed from the Location header.
+     *      The PDFreactor service will send a UUID as a document Id. 
+     *
+     * @param Convertable $config
+     * @return string
+     */
+    public function convertAsync($convertable): string
+    {
+        if (is_array($convertable)) {
+            $convertable    = Convertable::create($convertable);
         }
-        if (!is_null($config)) {
-           $config['clientName'] = "PHP";
-           $config['clientVersion'] = PDFreactor::VERSION;
+
+        if (! $convertable instanceof Convertable) {
+            throw new Exception('$convertable must be an Array or Convertable.');
         }
-        $headerStr = '';
-        $cookieStr = '';
-        if (!empty($this->headers)) {
-          foreach ($this->headers as $name => $value) {
-                $lcName = strtolower($name);
-                if ($lcName !== "user-agent" && $lcName !== "content-type" && $lcName !== "range") {
-                    $headerStr .= $name . ": " . $value . "\r\n";
-                }
-            }
+
+        $this->result = $this->api->send('POST', 'convert/async.json', $convertable->__toArray());
+
+        if (! isset($this->result->headers['Location'][0])) {
+            throw new HttpException("Unable to retrieve Document ID from Response.", 500);
         }
-        if (!empty($this->cookies)) {
-            foreach ($this->cookies as $name => $value) {
-                $cookieStr .= $name . "=" . $value . "; ";
-            }
+
+        // we get a url back like /progress/some-uu-id we only want the uuid.
+        preg_match('/[a-f0-9]{8}\-[a-f0-9]{4}\-4[a-f0-9]{3}\-(8|9|a|b)[a-f0-9]{3}\-[a-f0-9]{12}/', $this->result->headers['Location'][0], $matches);
+
+        if (! count($matches) || ! is_string($matches[0])) {
+            throw new HttpException("Unable to retrieve Document ID from Response.", 500);
         }
-        $headerStr .= "Content-Type: application/json\r\n";
-        $headerStr .= "User-Agent: PDFreactor PHP API v4\r\n";
-        $headerStr .= "X-RO-User-Agent: PDFreactor PHP API v4\r\n";
-        if (!empty($this->cookies) || !empty($cookieStr)) {
-            $headerStr .= "Cookie: " . substr($cookieStr, 0, -2);
-        }
-        $options = array(
-            'http' => array(
-                'header'  => $headerStr,
-                'follow_location' => false,
-                'max_redirects' => 0,
-                'method'  => 'POST',
-                'content' => json_encode($config),
-                'ignore_errors' => true
-            ),
-        );
-        $context = stream_context_create($options);
-        $result = null;
-        $errorMode = true;
-        $rh = fopen($url, false, false, $context);
-        if (!isset($http_response_header)) {
-            $lastError = error_get_last();
-            throw new \Exception('Error connecting to PDFreactor Web Service at ' . $this->url . '. Please make sure the PDFreactor Web Service is installed and running (Error: ' . $lastError['message'] . ')');
-        }
-        $status = intval(substr($http_response_header[0], 9, 3));
-        if ($status >= 200 && $status <= 204) {
-            $errorMode = false;
-        }
-        $result = stream_get_contents($rh);
-        fclose($rh);
-        if ($status == 422) {
-            throw new \Exception(json_decode($result)->error);
-        } else if ($status == 400) {
-            throw new \Exception('Invalid client data. '.json_decode($result)->error);
-        } else if ($status == 404) {
-            throw new \Exception('Error connecting to PDFreactor Web Service at ' . $this->url . '. Please make sure the PDFreactor Web Service is installed and running '.json_decode($result)->error);
-        } else if ($status == 403) {
-            throw new \Exception('Request rejected. '.json_decode($result)->error);
-        } else if ($status == 401) {
-            throw new \Exception('Unauthorized. '.json_decode($result)->error);
-        } else if ($status == 413) {
-            throw new \Exception('The configuration is too large to process.');
-        } else if ($status == 500) {
-            throw new \Exception(json_decode($result)->error);
-        } else if ($status == 503) {
-            throw new \Exception('PDFreactor Web Service is unavailable.');
-        } else if ($status > 400) {
-            throw new \Exception('PDFreactor Web Service error (status: ' . $status . ').');
-        }
-        return json_decode($result);
+
+        return $matches[0];
     }
-    function convertAsBinary($config, $wh = null) {
-        $url = $this->url ."/convert.bin";
-        if (!is_null($this->apiKey)) {
-            $url .= "?apiKey=" . $this->apiKey;
-        }
-        if (!is_null($config)) {
-            $config['clientName'] = "PHP";
-            $config['clientVersion'] = PDFreactor::VERSION;
-        }
-        $headerStr = '';
-        $cookieStr = '';
-        if (!empty($this->headers)) {
-            foreach ($this->headers as $name => $value) {
-                $lcName = strtolower($name);
-                if ($lcName !== "user-agent" && $lcName !== "content-type" && $lcName !== "range") {
-                    $headerStr .= $name . ": " . $value . "\r\n";
-                }
-            }
-        }
-        if (!empty($this->cookies)) {
-            foreach ($this->cookies as $name => $value) {
-                $cookieStr .= $name . "=" . $value . "; ";
-            }
-        }
-        $headerStr .= "Content-Type: application/json\r\n";
-        $headerStr .= "User-Agent: PDFreactor PHP API v4\r\n";
-        $headerStr .= "X-RO-User-Agent: PDFreactor PHP API v4\r\n";
-        if (!empty($this->cookies) || !empty($cookieStr)) {
-            $headerStr .= "Cookie: " . substr($cookieStr, 0, -2);
-        }
-        $options = array(
-            'http' => array(
-                'header'  => $headerStr,
-                'follow_location' => false,
-                'max_redirects' => 0,
-                'method'  => 'POST',
-                'content' => json_encode($config),
-                'ignore_errors' => true
-            ),
-        );
-        $context = stream_context_create($options);
-        $result = null;
-        $errorMode = true;
-        $rh = fopen($url, false, false, $context);
-        if (!isset($http_response_header)) {
-            $lastError = error_get_last();
-            throw new \Exception('Error connecting to PDFreactor Web Service at ' . $this->url . '. Please make sure the PDFreactor Web Service is installed and running (Error: ' . $lastError['message'] . ')');
-        }
-        $status = intval(substr($http_response_header[0], 9, 3));
-        if ($status >= 200 && $status <= 204) {
-            $errorMode = false;
-        }
-        if ($errorMode || $wh == null) {
-            $result = stream_get_contents($rh);
-            fclose($rh);
-        }
-        if ($status == 422) {
-            throw new \Exception($result);
-        } else if ($status == 400) {
-            throw new \Exception('Invalid client data. '.$result);
-        } else if ($status == 404) {
-            throw new \Exception('Error connecting to PDFreactor Web Service at ' . $this->url . '. Please make sure the PDFreactor Web Service is installed and running '.$result);
-        } else if ($status == 403) {
-            throw new \Exception('Request rejected. '.$result);
-        } else if ($status == 401) {
-            throw new \Exception('Unauthorized. '.$result);
-        } else if ($status == 413) {
-            throw new \Exception('The configuration is too large to process.');
-        } else if ($status == 500) {
-            throw new \Exception($result);
-        } else if ($status == 503) {
-            throw new \Exception('PDFreactor Web Service is unavailable.');
-        } else if ($status > 400) {
-            throw new \Exception('PDFreactor Web Service error (status: ' . $status . ').');
-        }
-        if (!$errorMode && $wh != null) {
-            while (!feof($rh)) {
-                if (fwrite($wh, fread($rh, 1024)) === FALSE) {
-                    return null;
-                }
-            }
-            fclose($rh);
-            fclose($wh);
-        }
-        return $result;
-    }
-    function convertAsync($config) {
-        $documentId = null;
-        $url = $this->url ."/convert/async.json";
-        if (!is_null($this->apiKey)) {
-            $url .= "?apiKey=" . $this->apiKey;
-        }
-        if (!is_null($config)) {
-            $config['clientName'] = "PHP";
-            $config['clientVersion'] = PDFreactor::VERSION;
-        }
-        $headerStr = '';
-        $cookieStr = '';
-        if (!empty($this->headers)) {
-            foreach ($this->headers as $name => $value) {
-                $lcName = strtolower($name);
-                if ($lcName !== "user-agent" && $lcName !== "content-type" && $lcName !== "range") {
-                    $headerStr .= $name . ": " . $value . "\r\n";
-                }
-            }
-        }
-        if (!empty($this->cookies)) {
-            foreach ($this->cookies as $name => $value) {
-                $cookieStr .= $name . "=" . $value . "; ";
-            }
-        }
-        $headerStr .= "Content-Type: application/json\r\n";
-        $headerStr .= "User-Agent: PDFreactor PHP API v4\r\n";
-        $headerStr .= "X-RO-User-Agent: PDFreactor PHP API v4\r\n";
-        if (!empty($this->cookies) || !empty($cookieStr)) {
-            $headerStr .= "Cookie: " . substr($cookieStr, 0, -2);
-        }
-        $options = array(
-            'http' => array(
-                'header'  => $headerStr,
-                'follow_location' => false,
-                'max_redirects' => 0,
-                'method'  => 'POST',
-                'content' => json_encode($config),
-                'ignore_errors' => true
-            ),
-        );
-        $context = stream_context_create($options);
-        $result = null;
-        $errorMode = true;
-        $rh = fopen($url, false, false, $context);
-        if (!isset($http_response_header)) {
-            $lastError = error_get_last();
-            throw new \Exception('Error connecting to PDFreactor Web Service at ' . $this->url . '. Please make sure the PDFreactor Web Service is installed and running (Error: ' . $lastError['message'] . ')');
-        }
-        $status = intval(substr($http_response_header[0], 9, 3));
-        if ($status >= 200 && $status <= 204) {
-            $errorMode = false;
-        }
-        $result = stream_get_contents($rh);
-        fclose($rh);
-        if ($status == 422) {
-            throw new \Exception(json_decode($result)->error);
-        } else if ($status == 400) {
-            throw new \Exception('Invalid client data. '.json_decode($result)->error);
-        } else if ($status == 404) {
-            throw new \Exception('Error connecting to PDFreactor Web Service at ' . $this->url . '. Please make sure the PDFreactor Web Service is installed and running '.json_decode($result)->error);
-        } else if ($status == 403) {
-            throw new \Exception('Request rejected. '.json_decode($result)->error);
-        } else if ($status == 401) {
-            throw new \Exception('Unauthorized. '.json_decode($result)->error);
-        } else if ($status == 413) {
-            throw new \Exception('The configuration is too large to process.');
-        } else if ($status == 500) {
-            throw new \Exception(json_decode($result)->error);
-        } else if ($status == 503) {
-            throw new \Exception('PDFreactor Web Service is unavailable.');
-        } else if ($status > 400) {
-            throw new \Exception('PDFreactor Web Service error (status: ' . $status . ').');
-        }
-        foreach ($http_response_header as $header) {
-            $t = explode(':', $header, 2);
-            if (isset($t[1])) {
-                $headerName = trim($t[0]);
-                if ($headerName == "Location") {
-                    $documentId = trim(substr($t[1], strrpos($t[1], "/") + 1));
-                }
-            }
-            if (preg_match('/^Set-Cookie:\s*([^;]+)/', $header, $matches)) {;
-                parse_str($matches[1], $tmp);
-                $keepDocument = false;
-                if (isset($config->{'keepDocument'})) {
-                    $keepDocument = $config->{'keepDocument'};
-                }
-                if (!isset($this->stickyMap[$documentId])) {
-                    $this->stickyMap[$documentId] = array("cookies"=>array(), "keepDocument"=>$keepDocument);
-                }
-                foreach ($tmp as $name => $value) {
-                    $this->stickyMap[$documentId]['cookies'][$name] = $value;
-                }
-            }
-        }
-        return $documentId;
-    }
-    function getProgress($documentId) {
-        if (is_null($documentId)) {
-            throw new \Exception("No conversion was triggered.");
-        }
-        $url = $this->url ."/progress/" . $documentId . ".json";
-        if (!is_null($this->apiKey)) {
-            $url .= "?apiKey=" . $this->apiKey;
-        }
-        $headerStr = '';
-        $cookieStr = '';
-        if (!empty($this->headers)) {
-            foreach ($this->headers as $name => $value) {
-                $lcName = strtolower($name);
-                if ($lcName !== "user-agent" && $lcName !== "content-type" && $lcName !== "range") {
-                    $headerStr .= $name . ": " . $value . "\r\n";
-                }
-            }
-        }
-        if (!empty($this->cookies)) {
-            foreach ($this->cookies as $name => $value) {
-                $cookieStr .= $name . "=" . $value . "; ";
-            }
-        }
-        if (!empty($this->stickyMap[$documentId])) {
-            foreach ($this->stickyMap[$documentId]['cookies'] as $name => $value) {
-                $cookieStr .= $name . "=" . $value . "; ";
-            }
-        }
-        $headerStr .= "Content-Type: application/json\r\n";
-        $headerStr .= "User-Agent: PDFreactor PHP API v4\r\n";
-        $headerStr .= "X-RO-User-Agent: PDFreactor PHP API v4\r\n";
-        if (!empty($this->cookies) || !empty($cookieStr)) {
-            $headerStr .= "Cookie: " . substr($cookieStr, 0, -2);
-        }
-        $options = array(
-            'http' => array(
-                'header'  => $headerStr,
-                'follow_location' => false,
-                'max_redirects' => 0,
-                'method'  => 'GET',
-                'ignore_errors' => true
-            ),
-        );
-        $context = stream_context_create($options);
-        $result = null;
-        $errorMode = true;
-        $rh = fopen($url, false, false, $context);
-        if (!isset($http_response_header)) {
-            $lastError = error_get_last();
-            throw new \Exception('Error connecting to PDFreactor Web Service at ' . $this->url . '. Please make sure the PDFreactor Web Service is installed and running (Error: ' . $lastError['message'] . ')');
-        }
-        $status = intval(substr($http_response_header[0], 9, 3));
-        if ($status >= 200 && $status <= 204) {
-            $errorMode = false;
-        }
-        $result = stream_get_contents($rh);
-        fclose($rh);
-        if ($status == 422) {
-            throw new \Exception(json_decode($result)->error);
-        } else if ($status == 400) {
-            throw new \Exception('Invalid client data. '.json_decode($result)->error);
-        } else if ($status == 404) {
-            throw new \Exception('Document with the given ID was not found. '.json_decode($result)->error);
-        } else if ($status == 403) {
-            throw new \Exception('Request rejected. '.json_decode($result)->error);
-        } else if ($status == 401) {
-            throw new \Exception('Unauthorized. '.json_decode($result)->error);
-        } else if ($status == 413) {
-            throw new \Exception('The configuration is too large to process.');
-        } else if ($status == 500) {
-            throw new \Exception(json_decode($result)->error);
-        } else if ($status == 503) {
-            throw new \Exception('PDFreactor Web Service is unavailable.');
-        } else if ($status > 400) {
-            throw new \Exception('PDFreactor Web Service error (status: ' . $status . ').');
-        }
-        return json_decode($result);
-    }
-    function getDocument($documentId) {
-        if (is_null($documentId)) {
-            throw new \Exception("No conversion was triggered.");
-        }
-        $url = $this->url ."/document/" . $documentId . ".json";
-        if (!is_null($this->apiKey)) {
-            $url .= "?apiKey=" . $this->apiKey;
-        }
-        $headerStr = '';
-        $cookieStr = '';
-        if (!empty($this->headers)) {
-            foreach ($this->headers as $name => $value) {
-                $lcName = strtolower($name);
-                if ($lcName !== "user-agent" && $lcName !== "content-type" && $lcName !== "range") {
-                    $headerStr .= $name . ": " . $value . "\r\n";
-                }
-            }
-        }
-        if (!empty($this->cookies)) {
-            foreach ($this->cookies as $name => $value) {
-                $cookieStr .= $name . "=" . $value . "; ";
-            }
-        }
-        if (!empty($this->stickyMap[$documentId])) {
-            foreach ($this->stickyMap[$documentId]['cookies'] as $name => $value) {
-                $cookieStr .= $name . "=" . $value . "; ";
-            }
-        }
-        if (!empty($this->stickyMap[$documentId]) && $this->stickyMap[$documentId]['keepDocument'] != true) {
-            unset($this->stickyMap[$documentId]);
-        }
-        $headerStr .= "Content-Type: application/json\r\n";
-        $headerStr .= "User-Agent: PDFreactor PHP API v4\r\n";
-        $headerStr .= "X-RO-User-Agent: PDFreactor PHP API v4\r\n";
-        if (!empty($this->cookies) || !empty($cookieStr)) {
-            $headerStr .= "Cookie: " . substr($cookieStr, 0, -2);
-        }
-        $options = array(
-            'http' => array(
-                'header'  => $headerStr,
-                'follow_location' => false,
-                'max_redirects' => 0,
-                'method'  => 'GET',
-                'ignore_errors' => true
-            ),
-        );
-        $context = stream_context_create($options);
-        $result = null;
-        $errorMode = true;
-        $rh = fopen($url, false, false, $context);
-        if (!isset($http_response_header)) {
-            $lastError = error_get_last();
-            throw new \Exception('Error connecting to PDFreactor Web Service at ' . $this->url . '. Please make sure the PDFreactor Web Service is installed and running (Error: ' . $lastError['message'] . ')');
-        }
-        $status = intval(substr($http_response_header[0], 9, 3));
-        if ($status >= 200 && $status <= 204) {
-            $errorMode = false;
-        }
-        $result = stream_get_contents($rh);
-        fclose($rh);
-        if ($status == 422) {
-            throw new \Exception(json_decode($result)->error);
-        } else if ($status == 400) {
-            throw new \Exception('Invalid client data. '.json_decode($result)->error);
-        } else if ($status == 404) {
-            throw new \Exception('Document with the given ID was not found. '.json_decode($result)->error);
-        } else if ($status == 403) {
-            throw new \Exception('Request rejected. '.json_decode($result)->error);
-        } else if ($status == 401) {
-            throw new \Exception('Unauthorized. '.json_decode($result)->error);
-        } else if ($status == 413) {
-            throw new \Exception('The configuration is too large to process.');
-        } else if ($status == 500) {
-            throw new \Exception(json_decode($result)->error);
-        } else if ($status == 503) {
-            throw new \Exception('PDFreactor Web Service is unavailable.');
-        } else if ($status > 400) {
-            throw new \Exception('PDFreactor Web Service error (status: ' . $status . ').');
-        }
-        return json_decode($result);
-    }
-    function getDocumentAsBinary($documentId, $wh = null) {
-        if (is_null($documentId)) {
-            throw new \Exception("No conversion was triggered.");
-        }
-        $url = $this->url ."/document/" . $documentId . ".bin";
-        if (!is_null($this->apiKey)) {
-            $url .= "?apiKey=" . $this->apiKey;
-        }
-        $headerStr = '';
-        $cookieStr = '';
-        if (!empty($this->headers)) {
-            foreach ($this->headers as $name => $value) {
-                $lcName = strtolower($name);
-                if ($lcName !== "user-agent" && $lcName !== "content-type" && $lcName !== "range") {
-                    $headerStr .= $name . ": " . $value . "\r\n";
-                }
-            }
-        }
-        if (!empty($this->cookies)) {
-            foreach ($this->cookies as $name => $value) {
-                $cookieStr .= $name . "=" . $value . "; ";
-            }
-        }
-        if (!empty($this->stickyMap[$documentId])) {
-            foreach ($this->stickyMap[$documentId]['cookies'] as $name => $value) {
-                $cookieStr .= $name . "=" . $value . "; ";
-            }
-        }
-        if (!empty($this->stickyMap[$documentId]) && $this->stickyMap[$documentId]['keepDocument'] != true) {
-            unset($this->stickyMap[$documentId]);
-        }
-        $headerStr .= "Content-Type: application/json\r\n";
-        $headerStr .= "User-Agent: PDFreactor PHP API v4\r\n";
-        $headerStr .= "X-RO-User-Agent: PDFreactor PHP API v4\r\n";
-        if (!empty($this->cookies) || !empty($cookieStr)) {
-            $headerStr .= "Cookie: " . substr($cookieStr, 0, -2);
-        }
-        $options = array(
-            'http' => array(
-                'header'  => $headerStr,
-                'follow_location' => false,
-                'max_redirects' => 0,
-                'method'  => 'GET',
-                'ignore_errors' => true
-            ),
-        );
-        $context = stream_context_create($options);
-        $result = null;
-        $errorMode = true;
-        $rh = fopen($url, false, false, $context);
-        if (!isset($http_response_header)) {
-            $lastError = error_get_last();
-            throw new \Exception('Error connecting to PDFreactor Web Service at ' . $this->url . '. Please make sure the PDFreactor Web Service is installed and running (Error: ' . $lastError['message'] . ')');
-        }
-        $status = intval(substr($http_response_header[0], 9, 3));
-        if ($status >= 200 && $status <= 204) {
-            $errorMode = false;
-        }
-        if ($errorMode || $wh == null) {
-            $result = stream_get_contents($rh);
-            fclose($rh);
-        }
-        if ($status == 422) {
-            throw new \Exception($result);
-        } else if ($status == 400) {
-            throw new \Exception('Invalid client data. '.$result);
-        } else if ($status == 404) {
-            throw new \Exception('Document with the given ID was not found. '.$result);
-        } else if ($status == 403) {
-            throw new \Exception('Request rejected. '.$result);
-        } else if ($status == 401) {
-            throw new \Exception('Unauthorized. '.$result);
-        } else if ($status == 413) {
-            throw new \Exception('The configuration is too large to process.');
-        } else if ($status == 500) {
-            throw new \Exception($result);
-        } else if ($status == 503) {
-            throw new \Exception('PDFreactor Web Service is unavailable.');
-        } else if ($status > 400) {
-            throw new \Exception('PDFreactor Web Service error (status: ' . $status . ').');
-        }
-        if (!$errorMode && $wh != null) {
-            while (!feof($rh)) {
-                if (fwrite($wh, fread($rh, 1024)) === FALSE) {
-                    return null;
-                }
-            }
-            fclose($rh);
-            fclose($wh);
-        }
-        return $result;
-    }
-    function deleteDocument($documentId) {
-        if (is_null($documentId)) {
-            throw new \Exception("No conversion was triggered.");
-        }
-        $url = $this->url ."/document/" . $documentId . ".json";
-        if (!is_null($this->apiKey)) {
-            $url .= "?apiKey=" . $this->apiKey;
-        }
-        $headerStr = '';
-        $cookieStr = '';
-        if (!empty($this->headers)) {
-            foreach ($this->headers as $name => $value) {
-                $lcName = strtolower($name);
-                if ($lcName !== "user-agent" && $lcName !== "content-type" && $lcName !== "range") {
-                    $headerStr .= $name . ": " . $value . "\r\n";
-                }
-            }
-        }
-        if (!empty($this->cookies)) {
-            foreach ($this->cookies as $name => $value) {
-                $cookieStr .= $name . "=" . $value . "; ";
-            }
-        }
-        if (!empty($this->stickyMap[$documentId])) {
-            foreach ($this->stickyMap[$documentId]['cookies'] as $name => $value) {
-                $cookieStr .= $name . "=" . $value . "; ";
-            }
-        }
-        if (!empty($this->stickyMap[$documentId])) {
-            unset($this->stickyMap[$documentId]);
-        }
-        $headerStr .= "Content-Type: application/json\r\n";
-        $headerStr .= "User-Agent: PDFreactor PHP API v4\r\n";
-        $headerStr .= "X-RO-User-Agent: PDFreactor PHP API v4\r\n";
-        if (!empty($this->cookies) || !empty($cookieStr)) {
-            $headerStr .= "Cookie: " . substr($cookieStr, 0, -2);
-        }
-        $options = array(
-            'http' => array(
-                'header'  => $headerStr,
-                'follow_location' => false,
-                'max_redirects' => 0,
-                'method'  => 'DELETE',
-                'ignore_errors' => true
-            ),
-        );
-        $context = stream_context_create($options);
-        $result = null;
-        $errorMode = true;
-        $rh = fopen($url, false, false, $context);
-        if (!isset($http_response_header)) {
-            $lastError = error_get_last();
-            throw new \Exception('Error connecting to PDFreactor Web Service at ' . $this->url . '. Please make sure the PDFreactor Web Service is installed and running (Error: ' . $lastError['message'] . ')');
-        }
-        $status = intval(substr($http_response_header[0], 9, 3));
-        if ($status >= 200 && $status <= 204) {
-            $errorMode = false;
-        }
-        $result = stream_get_contents($rh);
-        fclose($rh);
-        if ($status == 422) {
-            throw new \Exception(json_decode($result)->error);
-        } else if ($status == 400) {
-            throw new \Exception('Invalid client data. '.json_decode($result)->error);
-        } else if ($status == 404) {
-            throw new \Exception('Document with the given ID was not found. '.json_decode($result)->error);
-        } else if ($status == 403) {
-            throw new \Exception('Request rejected. '.json_decode($result)->error);
-        } else if ($status == 401) {
-            throw new \Exception('Unauthorized. '.json_decode($result)->error);
-        } else if ($status == 413) {
-            throw new \Exception('The configuration is too large to process.');
-        } else if ($status == 500) {
-            throw new \Exception(json_decode($result)->error);
-        } else if ($status == 503) {
-            throw new \Exception('PDFreactor Web Service is unavailable.');
-        } else if ($status > 400) {
-            throw new \Exception('PDFreactor Web Service error (status: ' . $status . ').');
+
+    /**
+     * Delete a document from the server.
+     * 
+     * @link https://www.pdfreactor.com/product/doc/webservice/rest.html#delete-document-id
+     * 
+     * @throws HttpException if the $documentId isn't found.
+     *
+     * @param string $documentId
+     * @return boolean
+     */
+    public function deleteDocument(string $documentId): bool
+    {
+        try {
+            $this->result = $this->api->send('DELETE', "document/{$documentId}.json");
+
+            return ($this->result->status === 204);
+
+        } catch (HttpException $e) {
+            // if it's a 404 error rewrite the message to include $documentId.
+            throw new HttpException(
+                ($e->getStatus() == 404 ? "No document was found with ID {$documentId}." : $e->getMessage()),
+                $e->getStatus(),
+                $e->getCode()
+            );
         }
     }
-    function getVersion() {
-        $url = $this->url ."/version.json";
-        if (!is_null($this->apiKey)) {
-            $url .= "?apiKey=" . $this->apiKey;
+
+    /**
+     * Returns the document with a given ID.
+     * 
+     * @link https://www.pdfreactor.com/product/doc/webservice/rest.html#get-document-id
+     *
+     * @param string $documentId
+     * @return Result
+     */
+    public function getDocument(string $documentId): Result
+    {
+        try {
+            $this->result   = $this->api->send('GET', "document/{$documentId}.json");
+
+            return (new Result($this->result->body));
+
+        } catch (HttpException $e) {
+            // if it's a 404 error rewrite the message to include $documentId.
+            throw new HttpException(
+                ($e->getStatus() == 404 ? "No document was found with ID {$documentId}." : $e->getMessage()),
+                $e->getStatus(),
+                $e->getCode()
+            );
         }
-        $headerStr = '';
-        $cookieStr = '';
-        if (!empty($this->headers)) {
-            foreach ($this->headers as $name => $value) {
-                $lcName = strtolower($name);
-                if ($lcName !== "user-agent" && $lcName !== "content-type" && $lcName !== "range") {
-                    $headerStr .= $name . ": " . $value . "\r\n";
+    }
+
+    /**
+     * Download a document. This will pull down the binary data of the document. If a $filename is given
+     * it will attempt to write the file to disk otherwise it will return the binary data.
+     * 
+     * @link https://www.pdfreactor.com/product/doc/webservice/rest.html#get-document-id
+     * 
+     * @throws Exception If a $filename is given but can't be written to.
+     * @throws HttpException If the API throws an HTTPException we will rewrite any 404 errors to
+     *      include the $documentId.
+     *
+     * @param string $documentId
+     * @param string|null $filename
+     * @return bool|string true if $filename is given and written to successfully. string if no $filename.
+     */
+    public function getDocumentAsBinary(string $documentId, ?string $filename = null) 
+    {
+        try {
+
+            $this->result   = $this->api->send('GET', "document/{$documentId}.bin");
+
+            // write the pdf to disk if a $filename is given.
+            if ($filename) {
+
+                // can we actually write to this file?
+                if (! is_writable($filename)) {
+                    throw new Exception("Unable to write document to {$filename}.");
                 }
+
+                $handle = fopen($filename, 'w');
+                fwrite($handle, $this->result->body, strlen($this->result->body));
+
+                return true;
             }
+
+            return $this->result->body;            
+
+        } catch (HttpException $e) {
+            // if it's a 404 error rewrite the message to include $documentId.
+            throw new HttpException(
+                ($e->getStatus() == 404 ? "No document was found with ID {$documentId}." : $e->getMessage()),
+                $e->getStatus(),
+                $e->getCode()
+            );
         }
-        if (!empty($this->cookies)) {
-            foreach ($this->cookies as $name => $value) {
-                $cookieStr .= $name . "=" . $value . "; ";
+    }
+
+    /**
+     * Returns result from the last API call made.
+     *
+     * @return stdClass|null
+     */
+    public function getLastResult(): ?stdClass
+    {
+        return $this->result;
+    }
+
+    /**
+     * Get the progress of an aysnc conversion process.
+     * 
+     * @link https://www.pdfreactor.com/product/doc/webservice/rest.html#get-progress-id
+     * 
+     * @throws HttpException when the server returns a 404 error.
+     * 
+     *
+     * @param string $documentId
+     * @return Progress
+     */
+    public function getProgress(string $documentId): Progress
+    {
+        // The native PDFreactor error doesn't attach the $documentId in the
+        // error message, so we'll catch and rethrow with it.
+        try {
+            $this->result = $this->api->send('GET', "progress/{$documentId}.json");
+
+            return (new Progress($this->result->body));
+
+        } catch (HttpException $e) {
+
+            throw new HttpException(
+                ($e->getStatus() == 404 ? "No document was found with ID {$documentId}." : $e->getMessage()),
+                $e->getStatus(),
+                $e->getCode()
+            );
+        }
+    }
+
+    /**
+     * Get the status of the server.
+     * 
+     * We're only getting the status of the server so we'll supress the HttpException that is raised if the
+     * server responds back with something other than a 200 status. It'll be up to the developer to decide
+     * how to raise the error to the end user.
+     * 
+     * @link https://www.pdfreactor.com/product/doc/webservice/rest.html#get-status
+     *
+     * @return stdClass
+     */
+    public function getStatus(): stdClass
+    {
+        try {
+
+            $this->result   = $this->api->send('GET', 'status.json');
+
+            return (object)['status' => 200, 'message' => 'OK'];
+
+        } catch (HttpException $e) {
+            $message    = [
+                'status'    => $e->getStatus(),
+                'error'     => [],
+            ];
+
+            if ($message['status'] == 401) {
+                $message['error']   = 'Client Authentication failed. Check your API key and try again.';
+            } elseif ($message['status'] == 503) {
+                $message['error']   = 'The server is currently unavailable to process requests.';
+            } else {
+                $message['status']  = 500;
+                $message['error']   = 'An unknown error occurred, please try again later.';
             }
-        }
-        $headerStr .= "Content-Type: application/json\r\n";
-        $headerStr .= "User-Agent: PDFreactor PHP API v4\r\n";
-        $headerStr .= "X-RO-User-Agent: PDFreactor PHP API v4\r\n";
-        if (!empty($this->cookies) || !empty($cookieStr)) {
-            $headerStr .= "Cookie: " . substr($cookieStr, 0, -2);
-        }
-        $options = array(
-            'http' => array(
-                'header'  => $headerStr,
-                'follow_location' => false,
-                'max_redirects' => 0,
-                'method'  => 'GET',
-                'ignore_errors' => true
-            ),
-        );
-        $context = stream_context_create($options);
-        $result = null;
-        $errorMode = true;
-        $rh = fopen($url, false, false, $context);
-        if (!isset($http_response_header)) {
-            $lastError = error_get_last();
-            throw new \Exception('Error connecting to PDFreactor Web Service at ' . $this->url . '. Please make sure the PDFreactor Web Service is installed and running (Error: ' . $lastError['message'] . ')');
-        }
-        $status = intval(substr($http_response_header[0], 9, 3));
-        if ($status >= 200 && $status <= 204) {
-            $errorMode = false;
-        }
-        $result = stream_get_contents($rh);
-        fclose($rh);
-        if ($status == 422) {
-            throw new \Exception(json_decode($result)->error);
-        } else if ($status == 400) {
-            throw new \Exception('Invalid client data. '.json_decode($result)->error);
-        } else if ($status == 404) {
-            throw new \Exception('Document with the given ID was not found. '.json_decode($result)->error);
-        } else if ($status == 403) {
-            throw new \Exception('Request rejected. '.json_decode($result)->error);
-        } else if ($status == 401) {
-            throw new \Exception('Unauthorized. '.json_decode($result)->error);
-        } else if ($status == 413) {
-            throw new \Exception('The configuration is too large to process.');
-        } else if ($status == 500) {
-            throw new \Exception(json_decode($result)->error);
-        } else if ($status == 503) {
-            throw new \Exception('PDFreactor Web Service is unavailable.');
-        } else if ($status > 400) {
-            throw new \Exception('PDFreactor Web Service error (status: ' . $status . ').');
-        }
-        return json_decode($result);
-    }
-    function getStatus() {
-        $url = $this->url ."/document.json";
-        if (!is_null($this->apiKey)) {
-            $url .= "?apiKey=" . $this->apiKey;
-        }
-        $headerStr = '';
-        $cookieStr = '';
-        if (!empty($this->headers)) {
-            foreach ($this->headers as $name => $value) {
-                $lcName = strtolower($name);
-                if ($lcName !== "user-agent" && $lcName !== "content-type" && $lcName !== "range") {
-                    $headerStr .= $name . ": " . $value . "\r\n";
-                }
-            }
-        }
-        if (!empty($this->cookies)) {
-            foreach ($this->cookies as $name => $value) {
-                $cookieStr .= $name . "=" . $value . "; ";
-            }
-        }
-        $headerStr .= "Content-Type: application/json\r\n";
-        $headerStr .= "User-Agent: PDFreactor PHP API v4\r\n";
-        $headerStr .= "X-RO-User-Agent: PDFreactor PHP API v4\r\n";
-        if (!empty($this->cookies) || !empty($cookieStr)) {
-            $headerStr .= "Cookie: " . substr($cookieStr, 0, -2);
-        }
-        $options = array(
-            'http' => array(
-                'header'  => $headerStr,
-                'follow_location' => false,
-                'max_redirects' => 0,
-                'method'  => 'GET',
-                'ignore_errors' => true
-            ),
-        );
-        $context = stream_context_create($options);
-        $result = null;
-        $errorMode = true;
-        $rh = fopen($url, false, false, $context);
-        if (!isset($http_response_header)) {
-            $lastError = error_get_last();
-            throw new \Exception('Error connecting to PDFreactor Web Service at ' . $this->url . '. Please make sure the PDFreactor Web Service is installed and running (Error: ' . $lastError['message'] . ')');
-        }
-        $status = intval(substr($http_response_header[0], 9, 3));
-        if ($status >= 200 && $status <= 204) {
-            $errorMode = false;
-        }
-        $result = stream_get_contents($rh);
-        fclose($rh);
-        if ($status == 422) {
-            throw new \Exception(json_decode($result)->error);
-        } else if ($status == 400) {
-            throw new \Exception('Invalid client data. '.json_decode($result)->error);
-        } else if ($status == 404) {
-            throw new \Exception('Document with the given ID was not found. '.json_decode($result)->error);
-        } else if ($status == 403) {
-            throw new \Exception('Request rejected. '.json_decode($result)->error);
-        } else if ($status == 401) {
-            throw new \Exception('Unauthorized. '.json_decode($result)->error);
-        } else if ($status == 413) {
-            throw new \Exception('The configuration is too large to process.');
-        } else if ($status == 500) {
-            throw new \Exception(json_decode($result)->error);
-        } else if ($status == 503) {
-            throw new \Exception('PDFreactor Web Service is unavailable.');
-        } else if ($status > 400) {
-            throw new \Exception('PDFreactor Web Service error (status: ' . $status . ').');
+
+            return (object)$message;
+
+        } catch (Exception $e) {
+            $message    = [
+                'status'    => 500,
+                'error'     => $e->getMessage(),
+            ];
+
+            return (object)$message;
         }
     }
-    function getDocumentUrl($documentId) {
-        if (!is_null($documentId)) {
-            return $this->url . "/document/" . $documentId;
-        }
-        return null;
+
+    /**
+     * Get the version info for the PDFreactor server.
+     * 
+     * @link https://www.pdfreactor.com/product/doc/webservice/rest.html#get-version
+     *
+     * @return Version
+     */
+    public function getVersion(): Version
+    {
+        $this->result   = $this->api->send('GET', 'version.json');
+        
+        return (new Version($this->result->body));
     }
-    function getProgressUrl($documentId) {
-        if (!is_null($documentId)) {
-            return $this->url . "/progress/" . $documentId;
-        }
-        return null;
-    }
-    const VERSION = 4;
-    public function __get($name) {
-        if ($name == "headers" || $name == "cookies" || $name == "apiKey") {
-            return isset($this->$name) ? $this->$name : null;
-        }
-    }
-}
-abstract class CallbackType {
-    const FINISH = "FINISH";
-    const PROGRESS = "PROGRESS";
-    const START = "START";
-}
-abstract class Cleanup {
-    const CYBERNEKO = "CYBERNEKO";
-    const JTIDY = "JTIDY";
-    const NONE = "NONE";
-    const TAGSOUP = "TAGSOUP";
-}
-abstract class ColorSpace {
-    const CMYK = "CMYK";
-    const RGB = "RGB";
-}
-abstract class Conformance {
-    const PDF = "PDF";
-    const PDFA1A = "PDFA1A";
-    const PDFA1A_PDFUA1 = "PDFA1A_PDFUA1";
-    const PDFA1B = "PDFA1B";
-    const PDFA2A = "PDFA2A";
-    const PDFA2A_PDFUA1 = "PDFA2A_PDFUA1";
-    const PDFA2B = "PDFA2B";
-    const PDFA2U = "PDFA2U";
-    const PDFA3A = "PDFA3A";
-    const PDFA3A_PDFUA1 = "PDFA3A_PDFUA1";
-    const PDFA3B = "PDFA3B";
-    const PDFA3U = "PDFA3U";
-    const PDFUA1 = "PDFUA1";
-    const PDFX1A_2001 = "PDFX1A_2001";
-    const PDFX1A_2003 = "PDFX1A_2003";
-    const PDFX3_2002 = "PDFX3_2002";
-    const PDFX3_2003 = "PDFX3_2003";
-    const PDFX4 = "PDFX4";
-    const PDFX4P = "PDFX4P";
-}
-abstract class ContentType {
-    const BINARY = "BINARY";
-    const BMP = "BMP";
-    const GIF = "GIF";
-    const HTML = "HTML";
-    const JPEG = "JPEG";
-    const JSON = "JSON";
-    const NONE = "NONE";
-    const PDF = "PDF";
-    const PNG = "PNG";
-    const TEXT = "TEXT";
-    const TIFF = "TIFF";
-    const XML = "XML";
-}
-abstract class Doctype {
-    const AUTODETECT = "AUTODETECT";
-    const HTML5 = "HTML5";
-    const XHTML = "XHTML";
-    const XML = "XML";
-}
-abstract class Encryption {
-    const NONE = "NONE";
-    const TYPE_128 = "TYPE_128";
-    const TYPE_40 = "TYPE_40";
-}
-abstract class ErrorPolicy {
-    const LICENSE = "LICENSE";
-    const MISSING_RESOURCE = "MISSING_RESOURCE";
-}
-abstract class ExceedingContentAgainst {
-    const NONE = "NONE";
-    const PAGE_BORDERS = "PAGE_BORDERS";
-    const PAGE_CONTENT = "PAGE_CONTENT";
-    const PARENT = "PARENT";
-}
-abstract class ExceedingContentAnalyze {
-    const CONTENT = "CONTENT";
-    const CONTENT_AND_BOXES = "CONTENT_AND_BOXES";
-    const CONTENT_AND_STATIC_BOXES = "CONTENT_AND_STATIC_BOXES";
-    const NONE = "NONE";
-}
-abstract class HttpsMode {
-    const LENIENT = "LENIENT";
-    const STRICT = "STRICT";
-}
-abstract class JavaScriptMode {
-    const DISABLED = "DISABLED";
-    const ENABLED = "ENABLED";
-    const ENABLED_NO_LAYOUT = "ENABLED_NO_LAYOUT";
-    const ENABLED_REAL_TIME = "ENABLED_REAL_TIME";
-    const ENABLED_TIME_LAPSE = "ENABLED_TIME_LAPSE";
-}
-abstract class KeystoreType {
-    const JKS = "JKS";
-    const PKCS12 = "PKCS12";
-}
-abstract class LogLevel {
-    const DEBUG = "DEBUG";
-    const FATAL = "FATAL";
-    const INFO = "INFO";
-    const NONE = "NONE";
-    const PERFORMANCE = "PERFORMANCE";
-    const WARN = "WARN";
-}
-abstract class MediaFeature {
-    const ASPECT_RATIO = "ASPECT_RATIO";
-    const COLOR = "COLOR";
-    const COLOR_INDEX = "COLOR_INDEX";
-    const DEVICE_ASPECT_RATIO = "DEVICE_ASPECT_RATIO";
-    const DEVICE_HEIGHT = "DEVICE_HEIGHT";
-    const DEVICE_WIDTH = "DEVICE_WIDTH";
-    const GRID = "GRID";
-    const HEIGHT = "HEIGHT";
-    const MONOCHROME = "MONOCHROME";
-    const ORIENTATION = "ORIENTATION";
-    const RESOLUTION = "RESOLUTION";
-    const WIDTH = "WIDTH";
-}
-abstract class MergeMode {
-    const APPEND = "APPEND";
-    const ARRANGE = "ARRANGE";
-    const OVERLAY = "OVERLAY";
-    const OVERLAY_BELOW = "OVERLAY_BELOW";
-    const PREPEND = "PREPEND";
-}
-abstract class OutputIntentDefaultProfile {
-    const FOGRA39 = "Coated FOGRA39";
-    const GRACOL = "Coated GRACoL 2006";
-    const IFRA = "ISO News print 26% (IFRA)";
-    const JAPAN = "Japan Color 2001 Coated";
-    const JAPAN_NEWSPAPER = "Japan Color 2001 Newspaper";
-    const JAPAN_UNCOATED = "Japan Color 2001 Uncoated";
-    const JAPAN_WEB = "Japan Web Coated (Ad)";
-    const SWOP = "US Web Coated (SWOP) v2";
-    const SWOP_3 = "Web Coated SWOP 2006 Grade 3 Paper";
-}
-abstract class OutputType {
-    const BMP = "BMP";
-    const GIF = "GIF";
-    const JPEG = "JPEG";
-    const PDF = "PDF";
-    const PNG = "PNG";
-    const PNG_AI = "PNG_AI";
-    const PNG_TRANSPARENT = "PNG_TRANSPARENT";
-    const PNG_TRANSPARENT_AI = "PNG_TRANSPARENT_AI";
-    const TIFF_CCITT_1D = "TIFF_CCITT_1D";
-    const TIFF_CCITT_GROUP_3 = "TIFF_CCITT_GROUP_3";
-    const TIFF_CCITT_GROUP_4 = "TIFF_CCITT_GROUP_4";
-    const TIFF_LZW = "TIFF_LZW";
-    const TIFF_PACKBITS = "TIFF_PACKBITS";
-    const TIFF_UNCOMPRESSED = "TIFF_UNCOMPRESSED";
-}
-abstract class OverlayRepeat {
-    const ALL_PAGES = "ALL_PAGES";
-    const LAST_PAGE = "LAST_PAGE";
-    const NONE = "NONE";
-    const TRIM = "TRIM";
-}
-abstract class PageOrder {
-    const BOOKLET = "BOOKLET";
-    const BOOKLET_RTL = "BOOKLET_RTL";
-    const EVEN = "EVEN";
-    const ODD = "ODD";
-    const REVERSE = "REVERSE";
-}
-abstract class PagesPerSheetDirection {
-    const DOWN_LEFT = "DOWN_LEFT";
-    const DOWN_RIGHT = "DOWN_RIGHT";
-    const LEFT_DOWN = "LEFT_DOWN";
-    const LEFT_UP = "LEFT_UP";
-    const RIGHT_DOWN = "RIGHT_DOWN";
-    const RIGHT_UP = "RIGHT_UP";
-    const UP_LEFT = "UP_LEFT";
-    const UP_RIGHT = "UP_RIGHT";
-}
-abstract class PdfScriptTriggerEvent {
-    const AFTER_PRINT = "AFTER_PRINT";
-    const AFTER_SAVE = "AFTER_SAVE";
-    const BEFORE_PRINT = "BEFORE_PRINT";
-    const BEFORE_SAVE = "BEFORE_SAVE";
-    const CLOSE = "CLOSE";
-    const OPEN = "OPEN";
-}
-abstract class ProcessingPreferences {
-    const SAVE_MEMORY_IMAGES = "SAVE_MEMORY_IMAGES";
-}
-abstract class ResourceType {
-    const FONT = "FONT";
-    const IFRAME = "IFRAME";
-    const IMAGE = "IMAGE";
-    const OBJECT = "OBJECT";
-    const RUNNING_DOCUMENT = "RUNNING_DOCUMENT";
-    const SCRIPT = "SCRIPT";
-    const STYLESHEET = "STYLESHEET";
-    const UNKNOWN = "UNKNOWN";
-}
-abstract class SigningMode {
-    const SELF_SIGNED = "SELF_SIGNED";
-    const VERISIGN_SIGNED = "VERISIGN_SIGNED";
-    const WINCER_SIGNED = "WINCER_SIGNED";
-}
-abstract class ViewerPreferences {
-    const CENTER_WINDOW = "CENTER_WINDOW";
-    const DIRECTION_L2R = "DIRECTION_L2R";
-    const DIRECTION_R2L = "DIRECTION_R2L";
-    const DISPLAY_DOC_TITLE = "DISPLAY_DOC_TITLE";
-    const DUPLEX_FLIP_LONG_EDGE = "DUPLEX_FLIP_LONG_EDGE";
-    const DUPLEX_FLIP_SHORT_EDGE = "DUPLEX_FLIP_SHORT_EDGE";
-    const DUPLEX_SIMPLEX = "DUPLEX_SIMPLEX";
-    const FIT_WINDOW = "FIT_WINDOW";
-    const HIDE_MENUBAR = "HIDE_MENUBAR";
-    const HIDE_TOOLBAR = "HIDE_TOOLBAR";
-    const HIDE_WINDOW_UI = "HIDE_WINDOW_UI";
-    const NON_FULLSCREEN_PAGE_MODE_USE_NONE = "NON_FULLSCREEN_PAGE_MODE_USE_NONE";
-    const NON_FULLSCREEN_PAGE_MODE_USE_OC = "NON_FULLSCREEN_PAGE_MODE_USE_OC";
-    const NON_FULLSCREEN_PAGE_MODE_USE_OUTLINES = "NON_FULLSCREEN_PAGE_MODE_USE_OUTLINES";
-    const NON_FULLSCREEN_PAGE_MODE_USE_THUMBS = "NON_FULLSCREEN_PAGE_MODE_USE_THUMBS";
-    const PAGE_LAYOUT_ONE_COLUMN = "PAGE_LAYOUT_ONE_COLUMN";
-    const PAGE_LAYOUT_SINGLE_PAGE = "PAGE_LAYOUT_SINGLE_PAGE";
-    const PAGE_LAYOUT_TWO_COLUMN_LEFT = "PAGE_LAYOUT_TWO_COLUMN_LEFT";
-    const PAGE_LAYOUT_TWO_COLUMN_RIGHT = "PAGE_LAYOUT_TWO_COLUMN_RIGHT";
-    const PAGE_LAYOUT_TWO_PAGE_LEFT = "PAGE_LAYOUT_TWO_PAGE_LEFT";
-    const PAGE_LAYOUT_TWO_PAGE_RIGHT = "PAGE_LAYOUT_TWO_PAGE_RIGHT";
-    const PAGE_MODE_FULLSCREEN = "PAGE_MODE_FULLSCREEN";
-    const PAGE_MODE_USE_ATTACHMENTS = "PAGE_MODE_USE_ATTACHMENTS";
-    const PAGE_MODE_USE_NONE = "PAGE_MODE_USE_NONE";
-    const PAGE_MODE_USE_OC = "PAGE_MODE_USE_OC";
-    const PAGE_MODE_USE_OUTLINES = "PAGE_MODE_USE_OUTLINES";
-    const PAGE_MODE_USE_THUMBS = "PAGE_MODE_USE_THUMBS";
-    const PICKTRAYBYPDFSIZE_FALSE = "PICKTRAYBYPDFSIZE_FALSE";
-    const PICKTRAYBYPDFSIZE_TRUE = "PICKTRAYBYPDFSIZE_TRUE";
-    const PRINTSCALING_APPDEFAULT = "PRINTSCALING_APPDEFAULT";
-    const PRINTSCALING_NONE = "PRINTSCALING_NONE";
-}
-abstract class XmpPriority {
-    const HIGH = "HIGH";
-    const LOW = "LOW";
-    const NONE = "NONE";
 }

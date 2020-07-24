@@ -4,11 +4,8 @@ namespace StepStone\PDFreactor;
 
 use Exception;
 use GuzzleHttp\Client as HttpClient;
-use GuzzleHttp\Exception\ClientException;
 use GuzzleHttp\Cookie\CookieJar;
-use GuzzleHttp\Handler\MockHandler;
-use GuzzleHttp\HandlerStack;
-use GuzzleHttp\Psr7\Response;
+use GuzzleHttp\Exception\RequestException;
 use stdClass;
 use StepStone\PDFreactor\Exceptions\HttpException;
 
@@ -117,34 +114,43 @@ class Api
                     $options['json']    = $body;
                     $response           = $this->http->request('POST', $uri, $options);
                 break;
+
+                case 'DELETE':
+                    $response   = $this->http->request('DELETE', $uri, $options);
+                break;
     
                 default:
-                    throw new HttpException('Invalid Request Method.', 500);
+                    throw new HttpException('Request method is not supported.', 501);
             }
 
-            $result = new stdClass;
+            $data   = new stdClass;
+
+            $data->body     = (string)$response->getBody();
+            $data->headers  = $response->getHeaders();
+            $data->status   = $response->getStatusCode();
+            $data->success  = ($data->status >= 200 && $data->status <= 204);
+
+            return $data;
+
+        } catch (RequestException $e) {
+            // Convert an GuzzleHttp\Exception\RequestException into a HttpException
+            $contentType    = $e->getResponse()->getHeader('Content-Type')[0] ?? null;
             
-            $result->headers    = $response->getHeaders();
-            $result->status     = $response->getStatusCode();
-            $result->success    = ($result->status >= 200 && $result->status <= 204);
+            // set the error message based on the content type.
+            switch ($contentType) {
+                case 'application/json':
+                    $message    = json_decode($e->getResponse()->getBody())->error ?? null;
+                break;
 
-            if ($result->status == 200 || $result->status == 201) {
-                $result->body   = $response->getBody();
-                $result->json   = json_decode($result->body);
-            } else {
-                $result->body   = null;
-                $result->json   = null;
+                case 'text/plain':
+                    $message    = $e->getResponse()->getBody();
+                break;
+
+                default:
+                    $message    = 'An unknown error has occurred.';
             }
-
-            return $result;
-
-        } catch (ClientException $e) {
-            // Convert an GuzzleHttp\Exception\ClientException into a HttpException
-            throw new HttpException(json_decode($e->getResponse()->getBody())->error, $e->getResponse()->getStatusCode());
-
-        } catch (HttpException $e) {
-            // Just rethrow it.
-            throw $e;
+            
+            throw new HttpException($message, $e->getResponse()->getStatusCode());
 
         } catch (Exception $e) {
             // convert an Exception into an HttpException

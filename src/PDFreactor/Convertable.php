@@ -138,4 +138,24 @@ class Convertable
 
         return (new self($body, $config));
     }
+
+    /**
+     * Read the contents of a file to pass to the create() method.
+     * 
+     * @throws Exception if the $file isn't found.
+     * 
+     * @uses self::create() to create the Convertable instance once the $file data is read.
+     *
+     * @param string $file
+     * @param array $config
+     * @return Convertable
+     */
+    public static function createFromFile(string $file, array $config = []): Convertable
+    {
+        if (! file_exists($file)) {
+            throw new Exception("Can't find file: {$file}");
+        }
+
+        return self::create(file_get_contents($file), $config);
+    }
 }
